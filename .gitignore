@@ -1,0 +1,3 @@
+# Ignore the Kubernetes development PEM file
+kubernetes-dev.pem
+kubernetes-dev.**

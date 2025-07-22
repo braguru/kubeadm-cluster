@@ -1,0 +1,44 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: create the 'ubuntu' user
+      user: name=ubuntu append=yes state=present createhome=yes shell=/bin/bash
+
+    - name: allow 'ubuntu' to have passwordless sudo
+      lineinfile:
+        dest: /etc/sudoers
+        line: 'ubuntu ALL=(ALL) NOPASSWD: ALL'
+        validate: 'visudo -cf %s'
+
+    - name: Ensure the 'ubuntu' user exists
+      user:
+        name: ubuntu
+        state: present
+        createhome: yes
+        shell: /bin/bash
+        groups: sudo  # Add to sudo group instead of modifying sudoers directly
+
+    # - name: Set up .ssh directory for ubuntu
+    #   file:
+    #     path: /home/ubuntu/.ssh
+    #     state: directory
+    #     owner: ubuntu
+    #     groups: ubuntu
+    #     mode: '0700'
+
+    # - name: Copy the private key to the ubuntu user
+    #   copy:
+    #     src: "~/kube-cluster/kubernetes-dev.pem"
+    #     dest: /home/ubuntu/.ssh/id_ed25519  # Or id_rsa if RSA key
+    #     owner: ubuntu
+    #     group: ubuntu
+    #     mode: '0600'
+
+    # - name: Set authorized_key for ubuntu (using the same PEM as public key)
+    #   shell: |
+    #     ssh-keygen -y -f /home/ubuntu/.ssh/id_ed25519 > /home/ubuntu/.ssh/authorized_keys &&
+    #     chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys &&
+    #     chmod 600 /home/ubuntu/.ssh/authorized_keysuntu key="{{item}}"
+    #   with_file:
+    #     - ~/kube-cluster/kubernetes-dev.pem

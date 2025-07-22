@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-pvc
+  namespace: gitlab
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: postgres-ebs-sc
+  resources:
+    requests:
+      storage: 10Gi

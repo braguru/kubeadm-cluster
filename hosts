@@ -1,0 +1,9 @@
+[control_plane]
+control1 ansible_host=3.254.75.209 ansible_user=ubuntu ansible_ssh_private_key_file=~/kube-cluster/kubernetes-dev.pem 
+
+[workers]
+worker1 ansible_host=54.216.3.180 ansible_user=ubuntu ansible_ssh_private_key_file=~/kube-cluster/kubernetes-dev.pem
+worker2 ansible_host=3.255.75.53 ansible_user=ubuntu ansible_ssh_private_key_file=~/kube-cluster/kubernetes-dev.pem
+
+[all:vars]
+ansible_python_interpreter='python3'

@@ -1,0 +1,17 @@
+---
+- name: Add and Install AWS EBS CSI Driver with Helm
+  hosts: all
+  tasks:
+    - name: Add aws-ebs-csi-driver Helm repo
+      command: helm repo add aws-ebs-csi-driver https://kubernetes-sigs.github.io/aws-ebs-csi-driver
+      register: add_repo_result
+      ignore_errors: false
+
+    - name: Update Helm repositories
+      command: helm repo update
+
+    - name: Install or upgrade aws-ebs-csi-driver chart
+      command: >
+        helm upgrade --install aws-ebs-csi-driver
+        aws-ebs-csi-driver/aws-ebs-csi-driver
+        --namespace kube-system

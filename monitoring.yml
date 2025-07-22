@@ -1,0 +1,87 @@
+---
+- name: Deploy Kubernetes Monitoring Stack
+  hosts: control_plane  # Target your control plane node(s)
+  become: yes
+  vars:
+    grafana_admin_password: "admin123"  # Change this in production!
+    ingress_domain: "monitoring.example.com"  # Your domain
+  tasks:
+    - name: Create monitoring namespace
+      become_user: ubuntu
+      ansible.builtin.shell: | 
+        kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+    - name: Install Helm
+      ansible.builtin.shell: |
+       curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+       executable: /bin/bash
+
+    # Install Prometheus Operator (includes Prometheus, Grafana, Alertmanager)
+    - name: Add prometheus-community helm repo
+      become_user: ubuntu
+      command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+    - name: Update helm repos
+      become_user: ubuntu
+      command: helm repo update
+
+    - name: Install kube-prometheus-stack
+      become_user: ubuntu
+      command: >
+        helm upgrade --install monitoring prometheus-community/kube-prometheus-stack
+        --namespace monitoring
+        --set grafana.adminPassword="{{ grafana_admin_password }}"
+        --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+        --set prometheus.service.type=NodePort
+        --set grafana.service.type=NodePort
+        --set grafana.service.nodePort=30000
+        --set prometheus.service.nodePort=30001
+
+    # Configure Ingress
+    - name: Create monitoring ingress
+      become_user: ubuntu
+      ansible.builtin.shell: |
+        kubectl apply -n monitoring -f - <<EOF
+        apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: monitoring-ingress
+          annotations:
+            nginx.ingress.kubernetes.io/rewrite-target: /
+            cert-manager.io/cluster-issuer: letsencrypt-prod  # If using cert-manager
+        spec:
+          ingressClassName: nginx
+          rules:
+          - host: "{{ ingress_domain }}"
+            http:
+              paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: monitoring-grafana
+                    port:
+                      number: 80
+              - path: /prometheus
+                pathType: Prefix
+                backend:
+                  service:
+                    name: monitoring-kube-prometheus-prometheus
+                    port:
+                      number: 9090
+          tls:
+          - hosts:
+            - "{{ ingress_domain }}"
+            secretName: monitoring-tls
+        EOF
+
+    - name: Verify deployments
+      become_user: ubuntu
+      command: kubectl get pods -n monitoring
+      register: monitoring_pods
+      changed_when: false
+
+    - name: Display monitoring pods status
+      debug:
+        var: monitoring_pods.stdout_lines

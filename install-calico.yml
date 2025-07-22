@@ -1,0 +1,23 @@
+---
+- name: Download Calico CNI plugin
+  hosts: control_plane  # Your Ansible group containing master nodes
+  become: yes
+  tasks:
+    - name: Download Calico manifest
+      get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
+        dest: /tmp/calico.yaml
+        mode: '0644'
+
+- name: Install Calico CNI plugin
+  hosts: control_plane  # Your Ansible group containing master nodes
+  tasks:
+    - name: Apply Calico manifest
+      command: kubectl apply -f /tmp/calico.yaml
+
+    - name: Wait for Calico pods to be ready
+      command: kubectl wait --for=condition=ready pod -l k8s-app=calico-node -n kube-system --timeout=300s
+      register: calico_ready
+      until: calico_ready.rc == 0
+      retries: 10
+      delay: 30

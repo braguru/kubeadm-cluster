@@ -1,0 +1,102 @@
+---
+- hosts: all
+  become: yes
+  handlers:
+    - name: restart kubelet  # ✅ Define the handler here
+      ansible.builtin.service:
+        name: kubelet
+        state: restarted
+        enabled: yes
+  tasks:
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - docker.io
+          - curl
+          - gnupg # gnupg is needed for gpg command
+          - apt-transport-https # Often included, but good to ensure
+          - ca-certificates # Essential for HTTPS
+        state: present
+        update_cache: yes
+    
+    - name: Add user to sudo group
+      ansible.builtin.user:
+        name: ubuntu
+        groups: sudo
+        append: yes
+
+
+    - name: Create /etc/apt/keyrings directory if it does not exist
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Add Kubernetes APT Key (for v1.33)
+      ansible.builtin.shell: |
+        curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.33/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        sudo chmod 644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      args:
+        creates: /etc/apt/keyrings/kubernetes-apt-keyring.gpg # Only run if key doesn't exist
+      changed_when: false # This command will always return changed=true, but we only care if the file is created
+
+    - name: Add Kubernetes Repository (for v1.33)
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.33/deb/ /"
+        filename: kubernetes # Creates /etc/apt/sources.list.d/kubernetes.list
+        state: present
+        update_cache: yes
+
+    - name: Install Kubernetes packages
+      ansible.builtin.apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+
+    - name: Hold Kubernetes packages to prevent unintended upgrades
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    # Task: Configure Kubelet cgroup driver
+    - name: Set Kubelet to use systemd cgroup driver
+      ansible.builtin.lineinfile:
+        path: /etc/default/kubelet
+        line: 'KUBELET_EXTRA_ARGS="--cgroup-driver=systemd"'
+        regexp: '^KUBELET_EXTRA_ARGS='
+        state: present
+      notify: restart kubelet
+
+    # Task: Verify Kubelet args (debug)
+    - name: Verify kubelet cgroup driver configuration
+      ansible.builtin.shell: |
+        if [ -f /etc/default/kubelet ]; then
+          grep -q 'cgroup-driver=systemd' /etc/default/kubelet && echo "systemd configured" || echo "systemd not configured"
+        else
+          echo "kubelet config file missing"
+        fi
+      register: kubelet_config_check
+      changed_when: false
+      failed_when: "'systemd not configured' in kubelet_config_check.stdout"
+
+    # Optional: Check running kubelet process (only if service is active)
+    - name: Check running kubelet cgroup driver
+      ansible.builtin.shell: |
+        if systemctl is-active kubelet &>/dev/null; then
+          ps -ef | grep kubelet | grep -q 'cgroup-driver=systemd' && echo "systemd active" || echo "systemd not active"
+        else
+          echo "kubelet not running"
+        fi
+      register: kubelet_running_check
+      changed_when: false
+      failed_when: "'systemd not active' in kubelet_running_check.stdout"
+      ignore_errors: yes

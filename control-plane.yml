@@ -1,0 +1,60 @@
+---
+- name: Set up Kubernetes control plane with Calico
+  hosts: control_plane
+  gather_facts: yes
+  become: yes
+  vars:  # Define defaults here
+    user_name: "ubuntu"  # Replace with your remote user
+    home_dir: "/home/{{ user_name }}"
+  tasks:
+    - name: Get real ubuntu IDs
+      shell: |
+        id -u ubuntu
+        id -g ubuntu
+      register: ubuntu_ids
+      changed_when: false
+
+    - name: Update apt package index
+      apt:
+        update_cache: yes
+      when: ansible_os_family == 'Debian'
+
+    - name: Install required packages
+      apt:
+        name:
+          - curl
+          - wget
+        state: present
+      when: ansible_os_family == 'Debian'
+
+    - name: Download Calico manifest
+      get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/master/manifests/calico.yaml
+        dest: /tmp/calico.yaml
+        mode: '0644'
+
+    - name: Initialize Kubernetes control plane
+      command: kubeadm init --node-name {{ inventory_hostname }}
+      register: kubeadm_init
+      ignore_errors: yes
+
+    - name: Create .kube directory
+      file:
+        path: "{{ home_dir }}/.kube"
+        state: directory
+        mode: '0755'
+
+    - name: Copy admin.conf to user config
+      copy:
+        remote_src: yes
+        src: /etc/kubernetes/admin.conf
+        dest: "{{ home_dir }}/.kube/config"
+        owner: "{{ ubuntu_ids.stdout_lines[0] }}"
+        group: "{{ ubuntu_ids.stdout_lines[1] }}"
+        mode: '0600'
+    
+    - name: Set KUBECONFIG in environment
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: "export KUBECONFIG={{ home_dir }}/.kube/config"
+        state: present

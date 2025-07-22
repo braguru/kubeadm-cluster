@@ -1,0 +1,11 @@
+- name: Copy Gitlab, Redis, and Postgres manifest files to control plane
+  hosts: control_plane
+  become: true
+  tasks:
+    - name: Copy Gitlab directory to control plane
+      copy:
+        src: ./gitlab/
+        dest: /home/ubuntu/gitlab/
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'

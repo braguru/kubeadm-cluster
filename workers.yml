@@ -1,0 +1,91 @@
+---
+- name: Configure Control Plane for Worker Node Joins
+  hosts: control_plane
+  # become: yes
+  gather_facts: no # Not strictly needed for this play, speeds it up
+
+  tasks:
+    - name: Generate kubeadm join command
+      command: kubeadm token create --print-join-command
+      register: join_command_output
+      changed_when: false # This command doesn't change system state in a way Ansible tracks
+
+    - name: Set fact for join command
+      set_fact:
+        kube_join_command: "{{ join_command_output.stdout }}"
+      # This fact will be available to subsequent plays in the same playbook
+
+- name: Join Worker Nodes to Kubernetes Cluster
+  hosts: workers
+  become: yes
+  gather_facts: yes # Needed for ansible_default_ipv4.address
+
+  vars:
+    # Access the fact set in the previous play on the control_plane host
+    # Assuming 'control_plane' group has only one host, or you pick the first one
+    control_plane_host_name: "{{ groups['control_plane'][0] }}"
+    # Use the fact directly from the control plane host's facts
+    join_command_for_workers: "{{ hostvars[control_plane_host_name].kube_join_command }}"
+
+  tasks:
+    # - name: Reset kubeadm on worker node (if previously configured)
+    #   command: kubeadm reset --force
+    #   args:
+    #     warn: false # Suppress warning about shell usage
+    #   register: reset_result
+    #   changed_when: false # Reset is idempotent, doesn't always "change" state
+    #   failed_when: reset_result.rc not in [0, 1] # Allow exit code 1 if no kubeadm config found
+
+    # - name: Clean up old Kubernetes configuration and certificates
+      # ansible.builtin.file:
+      #   path: "{{ item }}"
+      #   state: absent
+      # loop:
+      #   - /etc/kubernetes/pki
+      #   - /etc/kubernetes/kubelet.conf
+      #   - /var/lib/kubelet/pki
+      #   - /var/lib/kubelet/kubeconfig
+      # ignore_errors: yes # Ignore if files/dirs don't exist
+
+    # - name: Restart container runtime to ensure clean state
+    #   ansible.builtin.systemd:
+    #     name: "{{ 'containerd' if ansible_facts.services.containerd.status == 'running' else 'docker' }}"
+    #     state: restarted
+    #   # This assumes either containerd or docker is running. Adjust if you have a different runtime.
+    #   when: ansible_facts.services.containerd.status == 'running' or ansible_facts.services.docker.status == 'running'
+
+
+    - name: Join worker node to cluster
+      # Use the join command from the control plane and add --node-name
+      command: "{{ join_command_for_workers }} --node-name {{ inventory_hostname }}"
+      register: join_result
+      # args:
+      #   warn: false # Suppresses warning about shell usage
+      # Only run if the node isn't already joined and ready (optional, but good for idempotency)
+      # You might need a more sophisticated check if nodes are frequently flapping
+      # This will re-run if the node is not in 'Ready' state or not found by kubectl
+      # For first time joins, it will always run.
+      # when: "'Node {{ ansible_host }} Ready' not in lookup('pipe', 'kubectl get nodes -o wide')" # This lookup runs on controller, might not be ideal
+      # A simpler approach is to let kubeadm join handle it, and use failed_when/changed_when
+      # changed_when: "'This node has joined the cluster' in join_result.stdout"
+      # failed_when: join_result.rc != 0 and 'already exists' not in join_result.stderr
+
+    - name: Configure kubelet to use private IP for communication
+      ansible.builtin.lineinfile:
+        path: /etc/default/kubelet
+        line: "KUBELET_EXTRA_ARGS=--node-ip={{ ansible_default_ipv4.address }}"
+        create: yes
+        mode: '0644' # Ensure correct permissions
+      notify: restart kubelet
+
+    # - name: Label node as worker
+    #   command: kubectl label node {{ ansible_host }} node-role.kubernetes.io/worker=
+    #   delegate_to: "{{ control_plane_host_name }}" # Delegate to the control plane
+    #   run_once: yes # Only run this task once per playbook run for labeling
+    #   when: join_result.rc == 0 # Only label if the join command was successful
+
+  handlers:
+    - name: restart kubelet
+      ansible.builtin.systemd:
+        name: kubelet
+        state: restarted

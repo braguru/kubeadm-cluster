@@ -1,0 +1,27 @@
+---
+- name: Install NGINX Ingress Controller
+  hosts: control_plane  # Or whichever node should run the ingress controller
+  become: yes
+  tasks:
+    - name: Install NGINX Ingress Controller
+      become_user: ubuntu
+      command: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.5.1/deploy/static/provider/cloud/deploy.yaml
+
+    - name: Wait for ingress-nginx pods to be ready
+      become_user: ubuntu
+      command: kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=120s
+      register: ingress_ready
+      until: ingress_ready.rc == 0
+      retries: 5
+      delay: 10
+
+    - name: Verify installation
+      become_user: ubuntu
+      command: kubectl get pods -n ingress-nginx
+      register: ingress_pods
+      changed_when: false
+
+    - name: Display ingress controller status
+      debug:
+        var: ingress_pods.stdout_lines

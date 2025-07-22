@@ -1,0 +1,87 @@
+- name: Install Jenkins X CLI (jx)
+  hosts: control_plane
+  become: yes
+  tasks:
+    - name: Get latest jx release URL
+      uri:
+        url: "https://github.com/jenkins-x/jx/releases/latest"
+        return_content: yes
+      register: latest_release
+      
+    - name: Extract version tag
+      set_fact:
+        jx_version: "{{ latest_release.url.split('/')[-1] }}"
+      
+    - name: Download jx binary package
+      get_url:
+        url: "https://github.com/jenkins-x/jx/releases/download/{{ jx_version }}/jx-linux-amd64.tar.gz"
+        dest: /tmp/jx.tar.gz
+        timeout: 30
+        mode: '0644'
+      
+    - name: Create temporary extraction directory
+      file:
+        path: /tmp/jx-extract
+        state: directory
+        mode: '0755'
+      
+    - name: Extract the archive to temp directory
+      unarchive:
+        src: /tmp/jx.tar.gz
+        dest: /tmp/jx-extract
+        remote_src: yes
+        list_files: yes
+      register: extraction_result
+      
+    - name: Debug extracted files
+      debug:
+        var: extraction_result.files
+      
+    - name: Find the jx binary in extracted files
+      find:
+        paths: /tmp/jx-extract
+        patterns: "jx"
+        recurse: yes
+        file_type: file
+      register: found_jx
+      
+    - name: Move jx binary to /usr/local/bin
+      command: "mv {{ found_jx.files[0].path }} /usr/local/bin/jx"
+      when: found_jx.matched > 0
+      
+    - name: Set executable permissions
+      file:
+        path: /usr/local/bin/jx
+        mode: '0755'
+        owner: root
+        group: root
+      when: found_jx.matched > 0
+      
+    - name: Verify installation
+      command: /usr/local/bin/jx version
+      register: jx_version_check
+      changed_when: false
+      ignore_errors: yes
+      
+    - name: Display version if installed
+      debug:
+        msg: "{{ jx_version_check.stdout }}"
+      when: jx_version_check is success
+      
+    - name: Clean up temporary files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/jx.tar.gz
+        - /tmp/jx-extract
+      
+    - name: Fail if installation unsuccessful
+      fail:
+        msg: |
+          Failed to install jx. Possible issues:
+          1. Download failed
+          2. Archive structure changed
+          3. Binary not in expected location
+          Check the download URL: https://github.com/jenkins-x/jx/releases/download/{{ jx_version }}/jx-linux-amd64.tar.gz
+      when: found_jx.matched == 0 or jx_version_check is failed
